@@ -1,0 +1,42 @@
+{
+  "safe_address": "0x844e211e291077B11221c0F18615a64F2Ff19c26",
+  "chain_id": 1,
+  "transactions": [
+    {
+      "token": "USDC",
+      "amount_wei": "42449330000",
+      "amount_decimal": "42449.330000",
+      "transaction_hash": "0x15a0ad947fc98467486e656f0d312fcc8cda8da8fa9a8d67abe30a1e31fb75e7",
+      "transaction_data": {
+        "to": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "value": "0",
+        "data": "0xa9059cbb00000000000000000000000048287a1ac6a076163e3057ec0c99c05b494e341a00000000000000000000000000000000000000000000000000000009e22d5f50",
+        "operation": 0,
+        "safeTxGas": "0",
+        "baseGas": "0",
+        "gasPrice": "0",
+        "gasToken": "0x0000000000000000000000000000000000000000",
+        "refundReceiver": "0x0000000000000000000000000000000000000000",
+        "nonce": 14
+      }
+    },
+    {
+      "token": "Zora",
+      "amount_wei": "187969927611870000000000",
+      "amount_decimal": "187969.927612",
+      "transaction_hash": "0xa939d9bfd68d2e38e8c65e4cdc6569aa7cb0f24d6b36678cd8e37b66815f9e73",
+      "transaction_data": {
+        "to": "0xD8e60e1d0E5373b9f0b73dBD0eb104c55D8B87Cb",
+        "value": "0",
+        "data": "0xa9059cbb00000000000000000000000048287a1ac6a076163e3057ec0c99c05b494e341a0000000000000000000000000000000000000000000027cddec507a2f92d2c00",
+        "operation": 0,
+        "safeTxGas": "0",
+        "baseGas": "0",
+        "gasPrice": "0",
+        "gasToken": "0x0000000000000000000000000000000000000000",
+        "refundReceiver": "0x0000000000000000000000000000000000000000",
+        "nonce": 15
+      }
+    }
+  ]
+}

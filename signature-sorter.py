@@ -1,6 +1,6 @@
 """
-Simple Hash Sorter for Safe Transactions
-Just sorts transaction hashes in ascending hex order and concatenates them
+Simple Hash Sorter for Safe Signatures
+Just sorts signatures in ascending hex order and concatenates them
 """
 
 def sort_and_concatenate_hashes(hashes):
