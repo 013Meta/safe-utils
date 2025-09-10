@@ -22,10 +22,10 @@ def main():
     print("=" * 40)
     
     hashes = []
-    print("Enter transaction hashes (one per line, empty line to finish):")
+    print("Enter signatures (one per line, empty line to finish):")
     
     while True:
-        hash_input = input("Hash: ").strip()
+        hash_input = input("Signature: ").strip()
         if not hash_input:
             break
         hashes.append(hash_input)
