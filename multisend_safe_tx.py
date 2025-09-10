@@ -7,6 +7,7 @@ Combines USDC and ZORA transfers into a single Safe transaction using MultiSend
 from web3 import Web3
 from eth_utils import keccak
 import json
+import requests
 
 # MultiSend contract addresses by network
 MULTISEND_ADDRESSES = {
@@ -27,13 +28,34 @@ class MultiSendSafeTransaction:
         self.chain_id = chain_id
         self.multisend_address = MULTISEND_ADDRESSES.get(chain_id, MULTISEND_ADDRESSES[1])
         
-        # ERC20 ABI for balanceOf function
+        # ERC20 ABI for balanceOf, name, symbol, decimals functions
         self.erc20_abi = [
             {
                 "constant": True,
                 "inputs": [{"name": "_owner", "type": "address"}],
                 "name": "balanceOf",
                 "outputs": [{"name": "balance", "type": "uint256"}],
+                "type": "function"
+            },
+            {
+                "constant": True,
+                "inputs": [],
+                "name": "name",
+                "outputs": [{"name": "", "type": "string"}],
+                "type": "function"
+            },
+            {
+                "constant": True,
+                "inputs": [],
+                "name": "symbol",
+                "outputs": [{"name": "", "type": "string"}],
+                "type": "function"
+            },
+            {
+                "constant": True,
+                "inputs": [],
+                "name": "decimals",
+                "outputs": [{"name": "", "type": "uint8"}],
                 "type": "function"
             }
         ]
@@ -55,6 +77,92 @@ class MultiSendSafeTransaction:
         except Exception as e:
             print(f"❌ Error fetching balance for {token_address}: {e}")
             return 0
+    
+    def get_token_info(self, token_address):
+        """Get token name, symbol, decimals, and balance"""
+        try:
+            token_contract = self.w3.eth.contract(
+                address=Web3.to_checksum_address(token_address),
+                abi=self.erc20_abi
+            )
+            
+            name = token_contract.functions.name().call()
+            symbol = token_contract.functions.symbol().call()
+            decimals = token_contract.functions.decimals().call()
+            balance = token_contract.functions.balanceOf(self.safe_address).call()
+            
+            return {
+                'address': Web3.to_checksum_address(token_address),
+                'name': name,
+                'symbol': symbol,
+                'decimals': decimals,
+                'balance': balance,
+                'balance_formatted': f"{balance / (10 ** decimals):.6f}"
+            }
+        except Exception as e:
+            print(f"❌ Error fetching token info for {token_address}: {e}")
+            return None
+    
+    def discover_tokens_from_list(self, token_list):
+        """Check a list of known token addresses for balances"""
+        tokens_with_balance = []
+        
+        print("🔍 Checking tokens for balances...")
+        for token_address in token_list:
+            token_info = self.get_token_info(token_address)
+            if token_info and token_info['balance'] > 0:
+                tokens_with_balance.append(token_info)
+                print(f"✅ {token_info['symbol']}: {token_info['balance_formatted']}")
+        
+        return tokens_with_balance
+    
+    def get_all_tokens_alchemy(self, api_key):
+        """Get all ERC20 tokens with balances using Alchemy API"""
+        
+        # Chain mapping for Alchemy
+        chain_names = {
+            1: "eth-mainnet",
+            10: "opt-mainnet", 
+            8453: "base-mainnet",
+            42161: "arb-mainnet",
+            137: "polygon-mainnet"
+        }
+        
+        chain = chain_names.get(self.chain_id, "eth-mainnet")
+        
+        url = f"https://{chain}.g.alchemy.com/v2/{api_key}"
+        
+        payload = {
+            "id": 1,
+            "jsonrpc": "2.0",
+            "method": "alchemy_getTokenBalances",
+            "params": [self.safe_address]  # Gets ALL tokens automatically
+        }
+        
+        try:
+            response = requests.post(url, json=payload)
+            data = response.json()
+            
+            tokens_with_balance = []
+            
+            if 'result' in data and 'tokenBalances' in data['result']:
+                print(f"🔍 Found {len(data['result']['tokenBalances'])} tokens, checking balances...")
+                
+                for token_data in data['result']['tokenBalances']:
+                    balance = int(token_data['tokenBalance'], 16)  # Convert hex to int
+                    if balance > 0:
+                        # Get token info (name, symbol, decimals)
+                        token_info = self.get_token_info(token_data['contractAddress'])
+                        if token_info:
+                            tokens_with_balance.append(token_info)
+                            print(f"✅ {token_info['symbol']}: {token_info['balance_formatted']}")
+            
+            return tokens_with_balance
+            
+        except Exception as e:
+            print(f"❌ Error using Alchemy API: {e}")
+            print("💡 Falling back to manual token list...")
+            return []
         
     def encode_transfer_data(self, recipient, amount):
         """Encode ERC20 transfer function data"""
@@ -183,8 +291,8 @@ class MultiSendSafeTransaction:
         return safe_tx, tx_hash
 
 def main():
-    """Generate MultiSend transaction for USDC and ZORA transfers"""
-    print("=== Safe MultiSend Transaction Generator ===\n")
+    """Generate MultiSend transaction for ALL tokens in Safe"""
+    print("=== Safe MultiSend Transaction Generator (ALL TOKENS) ===\n")
     
     # Configuration - REPLACE WITH YOUR ACTUAL VALUES
     SAFE_ADDRESS = input("Enter your Safe address: ").strip() or "0xYOUR_SAFE_ADDRESS"
@@ -198,73 +306,75 @@ def main():
     network_input = input("Enter network (1=mainnet, 10=optimism, 8453=base) [default: 1]: ").strip()
     chain_id = int(network_input) if network_input else 1
     
-    # RPC endpoint
-    rpc_url = input("Enter RPC URL (or press Enter for default/local): ").strip()
-    if not rpc_url:
-        if chain_id == 1:
-            rpc_url = "https://eth-mainnet.public.blastapi.io"
-        elif chain_id == 10:
-            rpc_url = "https://optimism-mainnet.public.blastapi.io"
-        elif chain_id == 8453:
-            rpc_url = "https://base-mainnet.public.blastapi.io"
+    # Alchemy API key for token discovery
+    api_key = input("Enter your Alchemy API key (for token discovery): ").strip()
+    
+    # RPC endpoint (using Alchemy if API key provided)
+    if api_key:
+        chain_names = {1: "eth-mainnet", 10: "opt-mainnet", 8453: "base-mainnet"}
+        chain_name = chain_names.get(chain_id, "eth-mainnet")
+        rpc_url = f"https://{chain_name}.g.alchemy.com/v2/{api_key}"
+    else:
+        rpc_url = input("Enter RPC URL (or press Enter for default): ").strip()
+        if not rpc_url:
+            if chain_id == 1:
+                rpc_url = "https://eth-mainnet.public.blastapi.io"
+            elif chain_id == 10:
+                rpc_url = "https://optimism-mainnet.public.blastapi.io"
+            elif chain_id == 8453:
+                rpc_url = "https://base-mainnet.public.blastapi.io"
     
     # Nonce
     nonce_input = input("Enter Safe nonce [default: 0]: ").strip()
     nonce = int(nonce_input) if nonce_input else 0
     
-    # Token addresses
-    if chain_id == 1:  # Mainnet
-        USDC_ADDRESS = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
-        ZORA_ADDRESS = "0xD8e60e1d0E5373b9f0b73dBD0eb104c55D8B87Cb"  # Update with actual
-    else:
-        print(f"⚠️  Please verify token addresses for chain ID {chain_id}")
-        USDC_ADDRESS = input("Enter USDC token address: ").strip()
-        ZORA_ADDRESS = input("Enter ZORA token address: ").strip()
-    
     # Create MultiSend transaction builder
     multisend_builder = MultiSendSafeTransaction(SAFE_ADDRESS, chain_id, rpc_url)
     
-    print(f"\n🔍 Fetching live token balances for Safe {SAFE_ADDRESS}...")
+    print(f"\n🔍 Discovering ALL tokens in Safe {SAFE_ADDRESS}...")
     
-    # Get live balances
-    usdc_balance = multisend_builder.get_token_balance(USDC_ADDRESS)
-    zora_balance = multisend_builder.get_token_balance(ZORA_ADDRESS)
+    # Discover all tokens with balances
+    if api_key:
+        all_tokens = multisend_builder.get_all_tokens_alchemy(api_key)
+    else:
+        print("⚠️  No Alchemy API key provided, checking common tokens only...")
+        # Fallback to common token list if no API key
+        common_tokens = [
+            "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",  # USDC
+            "0xdAC17F958D2ee523a2206206994597C13D831ec7",  # USDT
+            "0x6B175474E89094C44Da98b954EedeAC495271d0F",  # DAI
+            "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",  # WETH
+        ]
+        all_tokens = multisend_builder.discover_tokens_from_list(common_tokens)
     
-    print(f"💰 USDC Balance: {usdc_balance} wei ({usdc_balance / 10**6:.2f} USDC)")
-    print(f"💰 ZORA Balance: {zora_balance} wei ({zora_balance / 10**18:.6f} ZORA)")
-    
-    # Confirm amounts to transfer
-    if usdc_balance == 0 and zora_balance == 0:
-        print("❌ No token balances found! Check Safe address and RPC connection.")
+    if not all_tokens:
+        print("❌ No tokens with balances found! Check Safe address and connection.")
         return
     
-    # Ask if user wants to transfer full balances or specify amounts
-    transfer_all = input("\nTransfer all available balances? (y/n) [default: y]: ").strip().lower()
-    if transfer_all != 'n':
-        USDC_AMOUNT = usdc_balance
-        ZORA_AMOUNT = zora_balance
-    else:
-        if usdc_balance > 0:
-            usdc_input = input(f"USDC amount to transfer (max: {usdc_balance / 10**6:.2f}): ").strip()
-            USDC_AMOUNT = int(float(usdc_input) * 10**6) if usdc_input else usdc_balance
-        else:
-            USDC_AMOUNT = 0
-            
-        if zora_balance > 0:
-            zora_input = input(f"ZORA amount to transfer (max: {zora_balance / 10**18:.6f}): ").strip()
-            ZORA_AMOUNT = int(float(zora_input) * 10**18) if zora_input else zora_balance  
-        else:
-            ZORA_AMOUNT = 0
+    print(f"\n💰 Found {len(all_tokens)} tokens with balances:")
+    for i, token in enumerate(all_tokens, 1):
+        print(f"  {i}. {token['symbol']}: {token['balance_formatted']}")
     
-    # Define token transfers (only include tokens with balance > 0)
+    # Ask if user wants to transfer all balances
+    transfer_all = input(f"\nTransfer ALL {len(all_tokens)} token balances? (y/n) [default: y]: ").strip().lower()
+    
+    if transfer_all == 'n':
+        print("Select tokens to transfer (comma-separated numbers, e.g., '1,3,5'):")
+        selected = input("Token numbers: ").strip()
+        if selected:
+            try:
+                indices = [int(x.strip()) - 1 for x in selected.split(',')]
+                all_tokens = [all_tokens[i] for i in indices if 0 <= i < len(all_tokens)]
+            except ValueError:
+                print("❌ Invalid selection, using all tokens")
+    
+    # Create token transfers
     token_transfers = []
-    if USDC_AMOUNT > 0:
-        token_transfers.append((USDC_ADDRESS, RECIPIENT_ADDRESS, USDC_AMOUNT))
-    if ZORA_AMOUNT > 0:
-        token_transfers.append((ZORA_ADDRESS, RECIPIENT_ADDRESS, ZORA_AMOUNT))
+    for token in all_tokens:
+        token_transfers.append((token['address'], RECIPIENT_ADDRESS, token['balance']))
     
     if not token_transfers:
-        print("❌ No tokens to transfer!")
+        print("❌ No tokens selected for transfer!")
         return
     
     # Build MultiSend transaction
@@ -278,12 +388,12 @@ def main():
     print(f"Nonce: {nonce}")
     print(f"MultiSend Contract: {multisend_builder.multisend_address}")
     
-    print(f"\n📋 Transaction Details:")
+    print(f"\n📋 Transaction Details ({len(token_transfers)} tokens):")
     for token_address, recipient, amount in token_transfers:
-        if token_address == USDC_ADDRESS:
-            print(f"USDC Transfer: {amount / 10**6:.2f} USDC")
-        elif token_address == ZORA_ADDRESS:
-            print(f"ZORA Transfer: {amount / 10**18:.6f} ZORA")
+        # Find token info from our discovered tokens
+        token_info = next((t for t in all_tokens if t['address'].lower() == token_address.lower()), None)
+        if token_info:
+            print(f"  {token_info['symbol']}: {amount / (10 ** token_info['decimals']):.6f}")
     
     print(f"\n🔑 Transaction Hash (for approveHash):")
     print(tx_hash)
@@ -307,19 +417,16 @@ def main():
     
     # Add transfer details to output data
     for token_address, recipient, amount in token_transfers:
-        if token_address == USDC_ADDRESS:
+        # Find token info from our discovered tokens
+        token_info = next((t for t in all_tokens if t['address'].lower() == token_address.lower()), None)
+        if token_info:
             output_data["transfers"].append({
-                "token": "USDC", 
-                "address": USDC_ADDRESS, 
-                "amount": amount, 
-                "amount_formatted": f"{amount / 10**6:.2f}"
-            })
-        elif token_address == ZORA_ADDRESS:
-            output_data["transfers"].append({
-                "token": "ZORA", 
-                "address": ZORA_ADDRESS, 
-                "amount": amount, 
-                "amount_formatted": f"{amount / 10**18:.6f}"
+                "token": token_info['symbol'],
+                "name": token_info['name'],
+                "address": token_address,
+                "amount": amount,
+                "decimals": token_info['decimals'],
+                "amount_formatted": f"{amount / (10 ** token_info['decimals']):.6f}"
             })
     
     with open('multisend_safe_tx.json', 'w') as f:
@@ -334,7 +441,7 @@ def main():
     print("4. Paste the transaction hash")
     print("5. Execute the approval")
     print("6. Once threshold is reached, execute the transaction")
-    print("\n💡 This combines both token transfers into a single Safe transaction!")
+    print(f"\n💡 This combines ALL {len(token_transfers)} token transfers into a single Safe transaction!")
 
 if __name__ == "__main__":
     main()
